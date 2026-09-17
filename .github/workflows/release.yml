@@ -27,30 +27,17 @@ jobs:
         with:
           key: windows-x86_64
 
+      - name: Ensure missing rules directory & file exists
+        shell: bash
+        run: |
+          mkdir -p crates/portscan/rules/cve
+          touch crates/portscan/rules/cve/builtin.toml
+
       - name: Build Release
         run: cargo build --release --locked --target x86_64-pc-windows-msvc -p gossan
 
-      - name: Stage release artifact
-        shell: bash
-        run: |
-          set -euo pipefail
-          stage="gossan-windows-x86_64"
-          mkdir -p "$stage"
-          cp "target/x86_64-pc-windows-msvc/release/gossan.exe" "$stage/"
-          cp README.md LICENSE-MIT LICENSE-APACHE CHANGELOG.md "$stage/" 2>/dev/null || true
-          7z a -tzip "${stage}.zip" "$stage"
-          echo "ASSET=${stage}.zip" >> "$GITHUB_ENV"
-
-      - name: SHA-256 checksum
-        shell: bash
-        run: |
-          shasum -a 256 "$ASSET" > "${ASSET}.sha256"
-          cat "${ASSET}.sha256"
-
-      - name: Upload Windows Zip Artifact
+      - name: Upload Windows Binary Artifact
         uses: actions/upload-artifact@v4
         with:
           name: gossan-windows-x86_64
-          path: |
-            ${{ env.ASSET }}
-            ${{ env.ASSET }}.sha256
+          path: target/x86_64-pc-windows-msvc/release/gossan.exe
