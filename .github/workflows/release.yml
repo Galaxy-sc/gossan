@@ -1,160 +1,56 @@
-name: release
+name: Manual Windows Build
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
   workflow_dispatch:
-    inputs:
-      tag:
-        description: "Tag to attach binaries to (leave empty for workflow-only build)"
-        required: false
-        default: ""
-
-permissions:
-  contents: write
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    name: build (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            archive: tar.gz
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            archive: tar.gz
-            cross: true
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            archive: tar.gz
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            archive: tar.gz
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            archive: zip
+  build-windows:
+    name: Build Windows Binary
+    runs-on: windows-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-pc-windows-msvc
 
       - name: Install protoc
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-
-      - name: Install protoc (macOS)
-        if: runner.os == 'macOS'
-        run: brew install protobuf
-
-      - name: Install protoc (Windows)
-        if: runner.os == 'Windows'
         run: choco install protoc -y
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}
+          key: windows-x86_64
 
-      - name: Install cross (linux/aarch64 only)
-        if: matrix.cross == true
-        run: cargo install cross --git https://github.com/cross-rs/cross --locked
+      - name: Build Release
+        run: cargo build --release --locked --target x86_64-pc-windows-msvc -p gossan
 
-      - name: Build (cross)
-        if: matrix.cross == true
-        run: cross build --release --locked --target ${{ matrix.target }} -p gossan
-
-      - name: Build (cargo)
-        if: matrix.cross != true
-        run: cargo build --release --locked --target ${{ matrix.target }} -p gossan
-
-      - name: Stage release artefacts
+      - name: Stage release artifact
         shell: bash
         run: |
           set -euo pipefail
-          # Stable asset names (no version) so /releases/latest/download/... works.
-          stage="gossan-${{ matrix.target }}"
+          stage="gossan-windows-x86_64"
           mkdir -p "$stage"
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            cp "target/${{ matrix.target }}/release/gossan.exe" "$stage/"
-          else
-            cp "target/${{ matrix.target }}/release/gossan" "$stage/"
-          fi
+          cp "target/x86_64-pc-windows-msvc/release/gossan.exe" "$stage/"
           cp README.md LICENSE-MIT LICENSE-APACHE CHANGELOG.md "$stage/" 2>/dev/null || true
-          if [ "${{ matrix.archive }}" = "zip" ]; then
-            7z a -tzip "${stage}.zip" "$stage"
-            echo "ASSET=${stage}.zip" >> "$GITHUB_ENV"
-          else
-            tar czf "${stage}.tar.gz" "$stage"
-            echo "ASSET=${stage}.tar.gz" >> "$GITHUB_ENV"
-          fi
+          7z a -tzip "${stage}.zip" "$stage"
+          echo "ASSET=${stage}.zip" >> "$GITHUB_ENV"
 
       - name: SHA-256 checksum
         shell: bash
         run: |
-          if command -v sha256sum >/dev/null; then
-            sha256sum "$ASSET" > "${ASSET}.sha256"
-          else
-            shasum -a 256 "$ASSET" > "${ASSET}.sha256"
-          fi
+          shasum -a 256 "$ASSET" > "${ASSET}.sha256"
           cat "${ASSET}.sha256"
 
-      - name: Upload as workflow artefact
+      - name: Upload Windows Zip Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ASSET }}
+          name: gossan-windows-x86_64
           path: |
             ${{ env.ASSET }}
             ${{ env.ASSET }}.sha256
-
-      - name: Attach to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            ${{ env.ASSET }}
-            ${{ env.ASSET }}.sha256
-          fail_on_unmatched_files: true
-          generate_release_notes: true
-
-  publish-crates:
-    name: publish crates.io
-    # Independent of the binary matrix so a single target flake cannot block crates.io.
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    # Trusted Publishing exchanges this job's OIDC identity for a short-lived
-    # upload token, so no registry secret lives in the repository.
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: crates-io-publish
-
-      - name: Authenticate to crates.io via Trusted Publishing
-        id: crates-io-auth
-        uses: rust-lang/crates-io-auth-action@v1
-
-      - name: Publish all workspace crates
-        run: bash scripts/publish.sh
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.crates-io-auth.outputs.token }}
