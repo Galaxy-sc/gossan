@@ -25,7 +25,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: windows-x86_64-v2
+          key: windows-x86_64-v3
 
       - name: Ensure missing rules directory & file exists
         shell: bash
@@ -33,8 +33,8 @@ jobs:
           mkdir -p crates/portscan/rules/cve
           touch crates/portscan/rules/cve/builtin.toml
 
-      - name: Update Cargo dependencies (Fix netforge/pnet version mismatch)
-        run: cargo update -p pnet -p netforge --precise 0.34.0 || cargo update
+      - name: Fix pnet dependency mismatch
+        run: cargo update -p pnet --precise 0.34.0 || true
 
       - name: Build Release
         run: cargo build --release --target x86_64-pc-windows-msvc -p gossan
